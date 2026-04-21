@@ -1,0 +1,8 @@
+{
+  "last_update": null,
+  "generated_at": null,
+  "total_products": 0,
+  "total_stores": 5,
+  "status": "pending_first_scrape",
+  "message": "Ejecuta el workflow 'Scraping Diario' en GitHub Actions para cargar precios reales."
+}

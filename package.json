@@ -1,0 +1,39 @@
+{
+  "name": "techcompara-scraper",
+  "version": "1.0.0",
+  "description": "Scraper y API para TechCompara.cl — comparador de precios de hardware en Chile",
+  "main": "api/server.js",
+  "scripts": {
+    "start": "node api/server.js",
+    "dev": "nodemon api/server.js",
+    "scrape": "node scraper/run-all.js",
+    "scrape:n1g": "node scraper/stores/n1g.js",
+    "scrape:alltec": "node scraper/stores/alltec.js",
+    "scrape:centralgamer": "node scraper/stores/centralgamer.js",
+    "scrape:centrale": "node scraper/stores/centrale.js",
+    "scrape:pcexpress": "node scraper/stores/pcexpress.js",
+    "scheduler": "node scheduler/cron.js",
+    "db:init": "node db/init.js",
+    "export": "node scripts/export-json.js",
+    "test": "node scraper/test.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "puppeteer": "^21.5.0",
+    "cheerio": "^1.0.0-rc.12",
+    "axios": "^1.6.0",
+    "better-sqlite3": "^9.2.2",
+    "node-cron": "^3.0.3",
+    "winston": "^3.11.0",
+    "dotenv": "^16.3.1",
+    "p-limit": "^4.0.0",
+    "user-agents": "^1.0.1386"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
