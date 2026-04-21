@@ -1,0 +1,93 @@
+name: Scraping Diario — TechCompara.cl
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      stores:
+        description: 'Tiendas a scrapear (dejar vacío = todas)'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  scrape:
+    name: Ejecutar scraping
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Instalar dependencias de Chromium
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+            libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
+            libxfixes3 libxrandr2 libgbm1 libasound2
+
+      - name: Restaurar DB del caché
+        uses: actions/cache@v4
+        with:
+          path: db/techcompara.db
+          key: techcompara-db-${{ github.run_number }}
+          restore-keys: |
+            techcompara-db-
+
+      - name: Inicializar base de datos
+        run: |
+          if [ ! -f db/techcompara.db ]; then
+            node db/init.js
+          fi
+        env:
+          DB_PATH: ./db/techcompara.db
+
+      - name: Ejecutar scraping
+        run: |
+          if [ -n "${{ github.event.inputs.stores }}" ]; then
+            node scraper/run-all.js --stores=${{ github.event.inputs.stores }}
+          else
+            node scraper/run-all.js
+          fi
+        env:
+          DB_PATH: ./db/techcompara.db
+          PUPPETEER_HEADLESS: 'true'
+          SCRAPE_TIMEOUT: '45000'
+          SCRAPE_DELAY_MIN: '2000'
+          SCRAPE_DELAY_MAX: '5000'
+          NODE_ENV: production
+
+      - name: Exportar datos a JSON
+        run: node scripts/export-json.js
+        env:
+          DB_PATH: ./db/techcompara.db
+
+      - name: Commit datos actualizados
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name  "github-actions[bot]"
+          git add docs/data/
+          git diff --staged --quiet || git commit -m "datos: actualización automática $(TZ='America/Santiago' date '+%Y-%m-%d %H:%M') CLT"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Subir logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraping-logs-${{ github.run_number }}
+          path: logs/
+          retention-days: 7
