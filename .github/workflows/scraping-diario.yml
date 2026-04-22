@@ -6,102 +6,184 @@ on:
   workflow_dispatch:
     inputs:
       stores:
-        description: 'Tiendas a scrapear (dejar vacío = todas)'
+        description: 'Tienda a scrapear'
         required: false
-        default: ''
-        type: string
+        default: 'todas'
+        type: choice
+        options:
+          - todas
+          - n1g
+          - alltec
+          - cg
+          - centrale
+          - pcexpress
 
 jobs:
-  scrape:
-    name: Ejecutar scraping
+  scrape-n1g:
+    name: "N1G.cl"
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-
+    timeout-minutes: 15
+    if: github.event_name == 'schedule' || github.event.inputs.stores == 'todas' || github.event.inputs.stores == 'n1g'
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - uses: actions/cache@v4
         with:
-          node-version: '20'
-
-      - name: Cache node_modules y Puppeteer
-        uses: actions/cache@v4
-        id: cache-npm
-        with:
-          path: |
-            node_modules
-            ~/.cache/puppeteer
-          key: npm-puppeteer-${{ hashFiles('package.json') }}
-          restore-keys: |
-            npm-puppeteer-
-
-      - name: Instalar dependencias
-        if: steps.cache-npm.outputs.cache-hit != 'true'
-        run: npm install
-
-      - name: Instalar dependencias de Chromium
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
-            libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
-            libxfixes3 libxrandr2 libgbm1 libasound2t64
-
-      - name: Restaurar DB del caché
-        uses: actions/cache@v4
+          path: node_modules
+          key: node-${{ hashFiles('package.json') }}
+      - run: npm install
+      - uses: actions/cache@v4
         with:
           path: db/techcompara.db
-          key: techcompara-db-${{ github.run_number }}
-          restore-keys: |
-            techcompara-db-
-
-      - name: Inicializar base de datos
-        run: |
-          if [ ! -f db/techcompara.db ]; then
-            echo "Inicializando base de datos..."
-            node db/init.js
-          else
-            echo "Base de datos existente ✓"
-          fi
-        env:
-          DB_PATH: ./db/techcompara.db
-
-      - name: Ejecutar scraping
-        run: |
-          if [ -n "${{ github.event.inputs.stores }}" ]; then
-            node scraper/run-all.js --stores=${{ github.event.inputs.stores }}
-          else
-            node scraper/run-all.js
-          fi
-        env:
-          DB_PATH: ./db/techcompara.db
-          PUPPETEER_HEADLESS: 'true'
-          SCRAPE_TIMEOUT: '45000'
-          SCRAPE_DELAY_MIN: '2000'
-          SCRAPE_DELAY_MAX: '5000'
-          NODE_ENV: production
-
-      - name: Exportar datos a JSON
-        run: node scripts/export-json.js
-        env:
-          DB_PATH: ./db/techcompara.db
-
-      - name: Commit datos actualizados
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name  "github-actions[bot]"
+          key: db-${{ github.run_number }}
+          restore-keys: db-
+      - run: if [ ! -f db/techcompara.db ]; then node db/init.js; fi
+        env: { DB_PATH: ./db/techcompara.db }
+      - run: node scraper/stores/n1g.js
+        env: { DB_PATH: ./db/techcompara.db, NODE_ENV: production }
+      - run: node scripts/export-json.js
+        env: { DB_PATH: ./db/techcompara.db }
+      - run: |
+          git config user.email "bot@github.com"
+          git config user.name "github-actions[bot]"
           git add docs/data/
-          git diff --staged --quiet || git commit -m "datos: actualización $(TZ='America/Santiago' date '+%Y-%m-%d %H:%M') CLT"
+          git diff --staged --quiet || git commit -m "precios N1G $(date '+%Y-%m-%d')"
           git push
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        env: { GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }
 
-      - name: Subir logs
-        if: always()
-        uses: actions/upload-artifact@v4
+  scrape-alltec:
+    name: "Alltec.cl"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: scrape-n1g
+    if: always() && (github.event_name == 'schedule' || github.event.inputs.stores == 'todas' || github.event.inputs.stores == 'alltec')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - uses: actions/cache@v4
         with:
-          name: scraping-logs-${{ github.run_number }}
-          path: logs/
-          retention-days: 7
+          path: node_modules
+          key: node-${{ hashFiles('package.json') }}
+      - run: npm install
+      - uses: actions/cache@v4
+        with:
+          path: db/techcompara.db
+          key: db-${{ github.run_number }}
+          restore-keys: db-
+      - run: if [ ! -f db/techcompara.db ]; then node db/init.js; fi
+        env: { DB_PATH: ./db/techcompara.db }
+      - run: node scraper/stores/alltec.js
+        env: { DB_PATH: ./db/techcompara.db, NODE_ENV: production }
+      - run: node scripts/export-json.js
+        env: { DB_PATH: ./db/techcompara.db }
+      - run: |
+          git config user.email "bot@github.com"
+          git config user.name "github-actions[bot]"
+          git add docs/data/
+          git diff --staged --quiet || git commit -m "precios Alltec $(date '+%Y-%m-%d')"
+          git push
+        env: { GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }
+
+  scrape-cg:
+    name: "CentralGamer.cl"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: scrape-alltec
+    if: always() && (github.event_name == 'schedule' || github.event.inputs.stores == 'todas' || github.event.inputs.stores == 'cg')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-${{ hashFiles('package.json') }}
+      - run: npm install
+      - uses: actions/cache@v4
+        with:
+          path: db/techcompara.db
+          key: db-${{ github.run_number }}
+          restore-keys: db-
+      - run: if [ ! -f db/techcompara.db ]; then node db/init.js; fi
+        env: { DB_PATH: ./db/techcompara.db }
+      - run: node scraper/stores/centralgamer.js
+        env: { DB_PATH: ./db/techcompara.db, NODE_ENV: production }
+      - run: node scripts/export-json.js
+        env: { DB_PATH: ./db/techcompara.db }
+      - run: |
+          git config user.email "bot@github.com"
+          git config user.name "github-actions[bot]"
+          git add docs/data/
+          git diff --staged --quiet || git commit -m "precios CentralGamer $(date '+%Y-%m-%d')"
+          git push
+        env: { GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }
+
+  scrape-centrale:
+    name: "Centrale.cl"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: scrape-cg
+    if: always() && (github.event_name == 'schedule' || github.event.inputs.stores == 'todas' || github.event.inputs.stores == 'centrale')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-${{ hashFiles('package.json') }}
+      - run: npm install
+      - uses: actions/cache@v4
+        with:
+          path: db/techcompara.db
+          key: db-${{ github.run_number }}
+          restore-keys: db-
+      - run: if [ ! -f db/techcompara.db ]; then node db/init.js; fi
+        env: { DB_PATH: ./db/techcompara.db }
+      - run: node scraper/stores/centrale.js
+        env: { DB_PATH: ./db/techcompara.db, NODE_ENV: production }
+      - run: node scripts/export-json.js
+        env: { DB_PATH: ./db/techcompara.db }
+      - run: |
+          git config user.email "bot@github.com"
+          git config user.name "github-actions[bot]"
+          git add docs/data/
+          git diff --staged --quiet || git commit -m "precios Centrale $(date '+%Y-%m-%d')"
+          git push
+        env: { GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }
+
+  scrape-pcexpress:
+    name: "PC-Express.cl"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: scrape-centrale
+    if: always() && (github.event_name == 'schedule' || github.event.inputs.stores == 'todas' || github.event.inputs.stores == 'pcexpress')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-${{ hashFiles('package.json') }}
+      - run: npm install
+      - uses: actions/cache@v4
+        with:
+          path: db/techcompara.db
+          key: db-${{ github.run_number }}
+          restore-keys: db-
+      - run: if [ ! -f db/techcompara.db ]; then node db/init.js; fi
+        env: { DB_PATH: ./db/techcompara.db }
+      - run: node scraper/stores/pcexpress.js
+        env: { DB_PATH: ./db/techcompara.db, NODE_ENV: production }
+      - run: node scripts/export-json.js
+        env: { DB_PATH: ./db/techcompara.db }
+      - run: |
+          git config user.email "bot@github.com"
+          git config user.name "github-actions[bot]"
+          git add docs/data/
+          git diff --staged --quiet || git commit -m "precios PC-Express $(date '+%Y-%m-%d')"
+          git push
+        env: { GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }
