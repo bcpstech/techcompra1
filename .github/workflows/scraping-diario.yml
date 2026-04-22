@@ -19,16 +19,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
+      - name: Setup Node.js 18
+        uses: actions/setup-node@v3
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: '18'
 
       - name: Instalar dependencias
-        run: npm ci
+        run: npm install
 
       - name: Instalar dependencias de Chromium
         run: |
@@ -39,7 +38,7 @@ jobs:
             libxfixes3 libxrandr2 libgbm1 libasound2
 
       - name: Restaurar DB del caché
-        uses: actions/cache@v4
+        uses: actions/cache@v3
         with:
           path: db/techcompara.db
           key: techcompara-db-${{ github.run_number }}
@@ -49,7 +48,10 @@ jobs:
       - name: Inicializar base de datos
         run: |
           if [ ! -f db/techcompara.db ]; then
+            echo "Inicializando base de datos..."
             node db/init.js
+          else
+            echo "Base de datos existente ✓"
           fi
         env:
           DB_PATH: ./db/techcompara.db
@@ -79,14 +81,14 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name  "github-actions[bot]"
           git add docs/data/
-          git diff --staged --quiet || git commit -m "datos: actualización automática $(TZ='America/Santiago' date '+%Y-%m-%d %H:%M') CLT"
+          git diff --staged --quiet || git commit -m "datos: actualización $(TZ='America/Santiago' date '+%Y-%m-%d %H:%M') CLT"
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Subir logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: scraping-logs-${{ github.run_number }}
           path: logs/
