@@ -1,8 +1,7 @@
 /**
  * scraper/stores/centralgamer.js
- * Scraper para www.centralgamer.cl
+ * WooCommerce
  */
-
 const BaseScraper = require('../base-scraper');
 
 const CATEGORY_URLS = [
@@ -18,86 +17,47 @@ const CATEGORY_URLS = [
 ];
 
 class CentralGamerScraper extends BaseScraper {
-  constructor() {
-    super('cg', 'CentralGamer');
-  }
+  constructor() { super('cg', 'CentralGamer'); }
 
   async scrapeAll() {
-    const page = await this.newPage();
     for (const { url, catId } of CATEGORY_URLS) {
-      try {
-        await this.scrapeCategory(page, url, catId);
-        await this.delay();
-      } catch (err) {
-        this.stats.errors++;
-        this.log('warn', `Error en categoría ${catId}: ${err.message}`);
-      }
+      try { await this.scrapeCategory(url, catId); await this.delay(); }
+      catch (err) { this.stats.errors++; this.log('warn', `Error ${catId}: ${err.message}`); }
     }
-    await page.close();
   }
 
-  async scrapeCategory(page, baseUrl, catId) {
-    let pageNum = 1;
-    let hasMore = true;
-    const MAX_PAGES = 15;
+  async scrapeCategory(baseUrl, catId) {
+    let page = 1; let hasMore = true;
+    while (hasMore && page <= 15) {
+      const url = page === 1 ? baseUrl : `${baseUrl}page/${page}/`;
+      const $ = await this.fetchPage(url);
+      if (!$) { this.stats.errors++; break; }
 
-    while (hasMore && pageNum <= MAX_PAGES) {
-      const url = pageNum === 1 ? baseUrl : `${baseUrl}page/${pageNum}/`;
-      const ok = await this.navigateWithRetry(page, url);
-      if (!ok) break;
-
-      try {
-        await page.waitForSelector('.products .product, ul.products li.product', { timeout: 10000 });
-      } catch { break; }
-
-      const products = await page.evaluate((catId) => {
-        const items = [];
-        document.querySelectorAll('ul.products li.product, .products .product').forEach(el => {
-          const nameEl  = el.querySelector('.woocommerce-loop-product__title, h2');
-          const priceEl = el.querySelector('.price ins .amount, .price .amount, .woocommerce-Price-amount');
-          const normalEl = el.querySelector('.price del .amount');
-          const linkEl  = el.querySelector('a.woocommerce-loop-product__link, a');
-          const imgEl   = el.querySelector('img');
-
-          const name  = nameEl?.textContent?.trim();
-          const price = priceEl?.textContent?.trim();
-          if (name && price) {
-            items.push({
-              name,
-              price,
-              normal: normalEl?.textContent?.trim(),
-              href:   linkEl?.href,
-              imgSrc: imgEl?.dataset?.src || imgEl?.src,
-              catId
-            });
-          }
-        });
-        return items;
-      }, catId);
+      const products = [];
+      $('ul.products li.product, .products .product').each((_, el) => {
+        const name  = $(el).find('.woocommerce-loop-product__title, h2').first().text().trim();
+        const price = $(el).find('.price ins .amount, .price .woocommerce-Price-amount').first().text().trim()
+                   || $(el).find('.price .amount').first().text().trim();
+        const normal = $(el).find('.price del .amount').first().text().trim();
+        const href  = $(el).find('a').first().attr('href');
+        const img   = $(el).find('img').first().attr('data-src') || $(el).find('img').first().attr('src');
+        if (name && price) products.push({ name, price, normal, href, img });
+      });
 
       if (!products.length) { hasMore = false; break; }
-
-      for (const item of products) {
-        const current = this.parsePrice(item.price);
-        if (!current) continue;
-        const normal = this.parsePrice(item.normal);
-        this.stats.found++;
-        this.saveProduct(
-          { name: item.name, category: item.catId, imageUrl: item.imgSrc },
-          { current, normal, discount: normal ? Math.round((1 - current / normal) * 100) : null, stock: 'in_stock', url: item.href }
-        );
+      for (const p of products) {
+        const current = this.parsePrice(p.price); if (!current) continue;
+        const normal = this.parsePrice(p.normal); this.stats.found++;
+        this.saveProduct({ name: p.name, category: catId, imageUrl: p.img },
+          { current, normal, discount: normal ? Math.round((1-current/normal)*100) : null, url: p.href });
       }
-
-      const next = await page.$('.woocommerce-pagination .next, .next.page-numbers');
-      hasMore = !!next;
-      pageNum++;
-      await this.delay();
+      hasMore = $('a.next, .next.page-numbers').length > 0;
+      page++; await this.delay(600, 1500);
     }
   }
 }
 
 if (require.main === module) {
-  new CentralGamerScraper().run().then(r => { console.log('Resultado CentralGamer:', r); process.exit(r.success ? 0 : 1); });
+  new CentralGamerScraper().run().then(r => { console.log('CentralGamer:', r); process.exit(r.success ? 0 : 1); });
 }
-
 module.exports = CentralGamerScraper;
