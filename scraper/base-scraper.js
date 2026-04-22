@@ -1,33 +1,58 @@
 /**
  * scraper/base-scraper.js
- * Clase base que maneja Puppeteer, reintentos, delays y guardado en DB.
- * Cada tienda extiende esta clase e implementa `scrapeCategory(page, url)`.
+ * Clase base con axios + cheerio (sin Puppeteer/Chromium)
+ * Mucho mÃ¡s rÃ¡pido y liviano â€” instalaciÃ³n en segundos.
  */
 
 require('dotenv').config();
-const puppeteer = require('puppeteer');
+const axios   = require('axios');
+const cheerio = require('cheerio');
 const { upsertProduct, upsertPrice, logScrape } = require('../db/database');
-const logger = require('./logger');
+const logger  = require('./logger');
 
-const TIMEOUT    = parseInt(process.env.SCRAPE_TIMEOUT   || 30000);
-const DELAY_MIN  = parseInt(process.env.SCRAPE_DELAY_MIN || 1500);
-const DELAY_MAX  = parseInt(process.env.SCRAPE_DELAY_MAX || 4000);
-const MAX_RETRY  = parseInt(process.env.SCRAPE_MAX_RETRIES || 3);
+// Configurar reintentos automÃ¡ticos
+let axiosRetry;
+try { axiosRetry = require('axios-retry'); } catch(e) {}
+
+const TIMEOUT   = parseInt(process.env.SCRAPE_TIMEOUT   || 20000);
+const DELAY_MIN = parseInt(process.env.SCRAPE_DELAY_MIN || 800);
+const DELAY_MAX = parseInt(process.env.SCRAPE_DELAY_MAX || 2500);
+const MAX_RETRY = parseInt(process.env.SCRAPE_MAX_RETRIES || 3);
+
+// Headers realistas para evitar bloqueos
+const DEFAULT_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+  'Accept-Language': 'es-CL,es;q=0.9,en;q=0.8',
+  'Accept-Encoding': 'gzip, deflate, br',
+  'Connection': 'keep-alive',
+  'Cache-Control': 'no-cache',
+};
 
 class BaseScraper {
-  /**
-   * @param {string} storeId  - ID en DB (ej: 'n1g')
-   * @param {string} storeName - Nombre legible
-   */
   constructor(storeId, storeName) {
     this.storeId   = storeId;
     this.storeName = storeName;
-    this.browser   = null;
     this.stats     = { found: 0, updated: 0, errors: 0 };
+
+    // Crear instancia axios con reintentos
+    this.client = axios.create({
+      timeout: TIMEOUT,
+      headers: DEFAULT_HEADERS,
+    });
+
+    if (axiosRetry) {
+      axiosRetry.default(this.client, {
+        retries: MAX_RETRY,
+        retryDelay: (count) => count * 2000,
+        retryCondition: (err) =>
+          axiosRetry.isNetworkOrIdempotentRequestError(err) ||
+          (err.response && err.response.status >= 500),
+      });
+    }
   }
 
-  // ── Utilidades ──────────────────────────────────────────────────────────
-
+  // â”€â”€ Utilidades â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   delay(min = DELAY_MIN, max = DELAY_MAX) {
     const ms = Math.floor(Math.random() * (max - min + 1)) + min;
     return new Promise(r => setTimeout(r, ms));
@@ -37,120 +62,63 @@ class BaseScraper {
     logger[level](msg, { store: this.storeId, ...extra });
   }
 
-  /** Limpia un precio chileno: "$ 1.299.990" → 1299990 */
   parsePrice(raw) {
     if (!raw) return null;
     const cleaned = String(raw).replace(/[^\d]/g, '');
     const num = parseInt(cleaned, 10);
-    return isNaN(num) ? null : num;
+    // Filtrar precios invÃ¡lidos (< $1.000 o > $100.000.000)
+    if (isNaN(num) || num < 1000 || num > 100000000) return null;
+    return num;
   }
 
-  /** Genera un slug URL-friendly */
   slugify(text) {
-    return text
-      .toLowerCase()
+    return text.toLowerCase()
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '');
+      .replace(/^-|-$/g, '')
+      .slice(0, 100);
   }
 
-  /** Detecta categoría por nombre de producto */
   detectCategory(name) {
     const n = name.toLowerCase();
-    if (/rtx|radeon|geforce|gpu|tarjeta (gráfica|de video)/i.test(n)) return 'gpu';
-    if (/ryzen|core (ultra|i[3579])|procesador|cpu/i.test(n))          return 'cpu';
-    if (/ddr[45]|ram|memoria/i.test(n))                                  return 'ram';
-    if (/nvme|ssd|m\.2|disco (sólido|duro)|hdd/i.test(n))              return 'storage';
-    if (/refriger|cooling|disipador|aio|cooler/i.test(n))               return 'cooling';
-    if (/placa madre|motherboard|mainboard/i.test(n))                   return 'mobo';
-    if (/fuente (de poder|de alimentación)|psu/i.test(n))               return 'psu';
-    if (/gabinete|case|torre/i.test(n))                                  return 'case';
-    if (/monitor|pantalla/i.test(n))                                     return 'monitor';
-    if (/teclado|mouse|headset|audifonos|auricular/i.test(n))           return 'periph';
+    if (/rtx|radeon rx|geforce|gpu|tarjeta (gr[aÃ¡]fica|de video)/i.test(n)) return 'gpu';
+    if (/ryzen|core (ultra|i[3579])|procesador|cpu/i.test(n))               return 'cpu';
+    if (/ddr[45]|\bram\b|memoria/i.test(n))                                  return 'ram';
+    if (/nvme|m\.2|ssd|disco (s[oÃ³]lido|duro)|hdd/i.test(n))               return 'storage';
+    if (/refriger|cooling|disipador|aio|cooler|ventilador/i.test(n))        return 'cooling';
+    if (/placa madre|motherboard|mainboard/i.test(n))                       return 'mobo';
+    if (/fuente (de poder|de alimentaci[oÃ³]n)|psu/i.test(n))                return 'psu';
+    if (/gabinete|\bcase\b|torre/i.test(n))                                  return 'case';
+    if (/monitor|pantalla/i.test(n))                                         return 'monitor';
+    if (/teclado|mouse|headset|aud[iÃ­]fonos|auricular/i.test(n))            return 'periph';
     return 'other';
   }
 
-  // ── Puppeteer ───────────────────────────────────────────────────────────
-
-  async launchBrowser() {
-    this.browser = await puppeteer.launch({
-      headless: process.env.PUPPETEER_HEADLESS !== 'false',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--disable-gpu',
-        '--window-size=1366,768',
-        '--disable-blink-features=AutomationControlled',
-      ],
-      defaultViewport: { width: 1366, height: 768 },
-    });
-    this.log('info', 'Browser iniciado');
-  }
-
-  async newPage() {
-    const page = await this.browser.newPage();
-
-    // Evitar detección de bot
-    await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => false });
-      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
-    });
-
-    // Headers realistas
-    await page.setExtraHTTPHeaders({
-      'Accept-Language': 'es-CL,es;q=0.9,en;q=0.8',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    });
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    );
-
-    page.setDefaultTimeout(TIMEOUT);
-    page.setDefaultNavigationTimeout(TIMEOUT);
-    return page;
-  }
-
-  async closeBrowser() {
-    if (this.browser) {
-      await this.browser.close();
-      this.browser = null;
-      this.log('info', 'Browser cerrado');
+  // â”€â”€ Fetch HTML â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  async fetchPage(url) {
+    try {
+      const res = await this.client.get(url);
+      return cheerio.load(res.data);
+    } catch (err) {
+      this.log('warn', `Error fetching ${url}: ${err.message}`);
+      return null;
     }
   }
 
-  // ── Navegar con reintentos ───────────────────────────────────────────────
-
-  async navigateWithRetry(page, url, retries = MAX_RETRY) {
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      try {
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
-        return true;
-      } catch (err) {
-        this.log('warn', `Intento ${attempt}/${retries} fallido: ${err.message}`, { url });
-        if (attempt < retries) await this.delay(2000, 5000);
-      }
-    }
-    return false;
-  }
-
-  // ── Guardar producto + precio en DB ─────────────────────────────────────
-
+  // â”€â”€ Guardar en DB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   saveProduct(product, price) {
     try {
       const external_id = `${this.storeId}_${this.slugify(product.name)}`;
       const row = upsertProduct({
         external_id,
         category_id: product.category || this.detectCategory(product.name),
-        brand:       product.brand || 'Desconocido',
+        brand:       product.brand || this.extractBrand(product.name),
         name:        product.name,
         slug:        this.slugify(product.name),
         image_url:   product.imageUrl || null,
         specs:       product.specs ? JSON.stringify(product.specs) : null,
         tags:        product.tags  ? JSON.stringify(product.tags)  : null,
       });
-
       if (!row || !row.id) return;
 
       upsertPrice({
@@ -159,48 +127,45 @@ class BaseScraper {
         price:        price.current,
         price_normal: price.normal || null,
         discount_pct: price.discount || null,
-        stock:        price.stock || 'unknown',
+        stock:        price.stock || 'in_stock',
         product_url:  price.url || null,
       });
-
       this.stats.updated++;
     } catch (err) {
       this.stats.errors++;
-      this.log('error', `Error guardando producto: ${err.message}`, { product: product.name });
+      this.log('error', `Error guardando: ${err.message}`, { name: product.name });
     }
   }
 
-  // ── Método principal — ejecuta el scraping completo de la tienda ────────
+  extractBrand(name) {
+    const brands = ['NVIDIA','AMD','Intel','Samsung','WD','Western Digital','Seagate',
+      'Corsair','G.Skill','Kingston','Crucial','ASUS','MSI','Gigabyte','ASRock',
+      'Noctua','Arctic','be quiet!','Seasonic','EVGA','Cooler Master','NZXT',
+      'LG','BenQ','AOC','Acer','Dell','Logitech','Razer','SteelSeries','HyperX'];
+    const upper = name.toUpperCase();
+    return brands.find(b => upper.includes(b.toUpperCase())) || 'GenÃ©rico';
+  }
 
+  // â”€â”€ Ejecutar scraping completo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async run() {
     const startTime = Date.now();
     const logId = logScrape(this.storeId, 'running');
-    this.log('info', `⬇️  Iniciando scraping`);
+    this.log('info', `â¬‡ï¸  Iniciando scraping (axios+cheerio)`);
 
     try {
-      await this.launchBrowser();
       await this.scrapeAll();
-
       const duration = Date.now() - startTime;
       logScrape(this.storeId, 'success', { ...this.stats, duration, logId });
-      this.log('info', `✅ Completado en ${(duration/1000).toFixed(1)}s — ${this.stats.updated} productos actualizados`);
+      this.log('info', `âœ… Completado en ${(duration/1000).toFixed(1)}s â€” ${this.stats.updated} productos`);
       return { success: true, ...this.stats, duration };
-
     } catch (err) {
       const duration = Date.now() - startTime;
-      logScrape(this.storeId, 'failed', { ...this.stats, errors: this.stats.errors + 1, errorDetail: err.message, duration, logId });
-      this.log('error', `❌ Error fatal: ${err.message}`);
+      logScrape(this.storeId, 'failed', { ...this.stats, errorDetail: err.message, duration, logId });
+      this.log('error', `âŒ Error fatal: ${err.message}`);
       return { success: false, error: err.message, ...this.stats };
-
-    } finally {
-      await this.closeBrowser();
     }
   }
 
-  /**
-   * IMPLEMENTAR EN CADA SUBCLASE
-   * Debe llamar a `this.saveProduct(product, price)` por cada item encontrado
-   */
   async scrapeAll() {
     throw new Error(`scrapeAll() debe implementarse en ${this.constructor.name}`);
   }
