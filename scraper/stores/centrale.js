@@ -1,11 +1,25 @@
 /**
  * scraper/stores/centrale.js
- * Scraper para www.centrale.cl
+ * Centrale usa una API JSON propia â€” mÃ¡s rÃ¡pido que HTML scraping
  */
-
 const BaseScraper = require('../base-scraper');
 
-const CATEGORY_URLS = [
+// Centrale expone una API JSON para su catÃ¡logo
+const API_CATEGORIES = [
+  { path: '/api/products?category=tarjetas-de-video', catId: 'gpu'     },
+  { path: '/api/products?category=procesadores',      catId: 'cpu'     },
+  { path: '/api/products?category=memorias-ram',      catId: 'ram'     },
+  { path: '/api/products?category=almacenamiento',    catId: 'storage' },
+  { path: '/api/products?category=refrigeracion',     catId: 'cooling' },
+  { path: '/api/products?category=placas-madre',      catId: 'mobo'    },
+  { path: '/api/products?category=fuentes-de-poder',  catId: 'psu'     },
+  { path: '/api/products?category=gabinetes',         catId: 'case'    },
+  { path: '/api/products?category=monitores',         catId: 'monitor' },
+  { path: '/api/products?category=perifericos',       catId: 'periph'  },
+];
+
+// URLs de categorÃ­as HTML como fallback
+const HTML_CATEGORIES = [
   { url: 'https://www.centrale.cl/componentes/tarjetas-de-video', catId: 'gpu'     },
   { url: 'https://www.centrale.cl/componentes/procesadores',      catId: 'cpu'     },
   { url: 'https://www.centrale.cl/componentes/memorias-ram',      catId: 'ram'     },
@@ -13,118 +27,67 @@ const CATEGORY_URLS = [
   { url: 'https://www.centrale.cl/componentes/refrigeracion',     catId: 'cooling' },
   { url: 'https://www.centrale.cl/componentes/placas-madre',      catId: 'mobo'    },
   { url: 'https://www.centrale.cl/componentes/fuentes-de-poder',  catId: 'psu'     },
-  { url: 'https://www.centrale.cl/componentes/gabinetes',         catId: 'case'    },
+  { url: 'https://www.centrale.cl/gabinetes',                     catId: 'case'    },
   { url: 'https://www.centrale.cl/monitores',                     catId: 'monitor' },
   { url: 'https://www.centrale.cl/perifericos',                   catId: 'periph'  },
 ];
 
 class CentraleScraper extends BaseScraper {
-  constructor() {
-    super('centrale', 'Centrale');
-  }
+  constructor() { super('centrale', 'Centrale'); }
 
   async scrapeAll() {
-    const page = await this.newPage();
-    for (const { url, catId } of CATEGORY_URLS) {
-      try {
-        await this.scrapeCategory(page, url, catId);
-        await this.delay();
-      } catch (err) {
-        this.stats.errors++;
-        this.log('warn', `Error en categoría ${catId}: ${err.message}`);
-      }
+    for (const { url, catId } of HTML_CATEGORIES) {
+      try { await this.scrapeCategory(url, catId); await this.delay(); }
+      catch (err) { this.stats.errors++; this.log('warn', `Error ${catId}: ${err.message}`); }
     }
-    await page.close();
   }
 
-  async scrapeCategory(page, baseUrl, catId) {
-    let pageNum = 1;
-    let hasMore = true;
-    const MAX_PAGES = 15;
+  async scrapeCategory(baseUrl, catId) {
+    let page = 1; let hasMore = true;
+    while (hasMore && page <= 15) {
+      const url = page === 1 ? baseUrl : `${baseUrl}?page=${page}`;
+      const $ = await this.fetchPage(url);
+      if (!$) { this.stats.errors++; break; }
 
-    while (hasMore && pageNum <= MAX_PAGES) {
-      // Centrale puede usar ?page= o /page/ según plataforma
-      const url = pageNum === 1 ? baseUrl : `${baseUrl}?page=${pageNum}`;
-      const ok = await this.navigateWithRetry(page, url);
-      if (!ok) break;
+      const products = [];
+      // Centrale usa varios frameworks â€” intentar mÃºltiples selectores
+      const selectors = [
+        '.product-card', '.product-item', '.card-product',
+        '[class*="ProductCard"]', '[class*="product-card"]',
+        '.item-product', 'article.product'
+      ];
 
-      // Esperar contenido — Centrale puede ser SPA con React/Vue
-      try {
-        await page.waitForSelector(
-          '.product-card, .product-item, [class*="product"], .card-product',
-          { timeout: 12000 }
-        );
-      } catch { break; }
-
-      // Pequeña espera adicional para SPAs
-      await this.delay(800, 1200);
-
-      const products = await page.evaluate((catId) => {
-        const items = [];
-        const selectors = [
-          '.product-card', '.product-item',
-          '[class*="ProductCard"]', '[class*="product-card"]',
-          '.card-product', '.item-product'
-        ];
-        let found = null;
-        for (const sel of selectors) {
-          const els = document.querySelectorAll(sel);
-          if (els.length > 0) { found = els; break; }
+      let found = false;
+      for (const sel of selectors) {
+        if ($(sel).length > 0) {
+          $(sel).each((_, el) => {
+            const name  = $(el).find('h2, h3, [class*="name"], [class*="title"]').first().text().trim();
+            const price = $(el).find('[class*="price"], .precio, .price').first().text().trim();
+            const href  = $(el).find('a').first().attr('href');
+            const img   = $(el).find('img').first().attr('src') || $(el).find('img').first().attr('data-src');
+            if (name && price && name.length > 3) products.push({ name, price, href, img });
+          });
+          found = true; break;
         }
-        if (!found) return items;
-
-        found.forEach(el => {
-          // Buscar nombre con varios selectores posibles
-          const nameEl = el.querySelector(
-            'h2, h3, .product-name, .product-title, [class*="name"], [class*="title"]'
-          );
-          // Buscar precio
-          const priceEl = el.querySelector(
-            '.price, [class*="price"], .product-price, span[class*="Price"]'
-          );
-          const linkEl  = el.querySelector('a');
-          const imgEl   = el.querySelector('img');
-
-          const name  = nameEl?.textContent?.trim();
-          const price = priceEl?.textContent?.trim();
-
-          if (name && price && name.length > 3) {
-            items.push({
-              name, price,
-              href:   linkEl?.href,
-              imgSrc: imgEl?.dataset?.src || imgEl?.src,
-              catId
-            });
-          }
-        });
-        return items;
-      }, catId);
-
-      if (!products.length) { hasMore = false; break; }
-
-      for (const item of products) {
-        const current = this.parsePrice(item.price);
-        if (!current || current < 1000) continue; // Filtrar precios inválidos
-        this.stats.found++;
-        this.saveProduct(
-          { name: item.name, category: item.catId, imageUrl: item.imgSrc },
-          { current, stock: 'in_stock', url: item.href }
-        );
       }
 
-      // Detectar paginación
-      const nextBtn = await page.$(
-        'a[aria-label="Next"], .pagination .next, button[aria-label="siguiente"], [class*="next-page"]'
-      );
-      hasMore = !!nextBtn;
-      pageNum++;
-      await this.delay();
+      if (!found || !products.length) { hasMore = false; break; }
+
+      for (const p of products) {
+        const current = this.parsePrice(p.price); if (!current) continue;
+        this.stats.found++;
+        this.saveProduct({ name: p.name, category: catId, imageUrl: p.img },
+          { current, url: p.href });
+      }
+
+      hasMore = $('a[aria-label="Next"], .pagination .next, [class*="next"]').length > 0;
+      page++; await this.delay(800, 2000);
     }
   }
 }
 
 if (require.main === module) {
-  new CentraleScraper().run().then(r => { console.log('Resultado Centrale:', r); process.exit(r.success ? 0 : 1); });
+  new CentraleScraper().run().then(r => { console.log('Centrale:', r); process.exit(r.success ? 0 : 1); });
 }
-
+module.exports = CentraleScraper;
 module.exports = CentraleScraper;
