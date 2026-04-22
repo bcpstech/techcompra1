@@ -19,26 +19,38 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Setup Node.js 18
-        uses: actions/setup-node@v3
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
+
+      - name: Cache node_modules y Puppeteer
+        uses: actions/cache@v4
+        id: cache-npm
+        with:
+          path: |
+            node_modules
+            ~/.cache/puppeteer
+          key: npm-puppeteer-${{ hashFiles('package.json') }}
+          restore-keys: |
+            npm-puppeteer-
 
       - name: Instalar dependencias
+        if: steps.cache-npm.outputs.cache-hit != 'true'
         run: npm install
 
       - name: Instalar dependencias de Chromium
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
             libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
             libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
             libxfixes3 libxrandr2 libgbm1 libasound2t64
 
       - name: Restaurar DB del caché
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: db/techcompara.db
           key: techcompara-db-${{ github.run_number }}
