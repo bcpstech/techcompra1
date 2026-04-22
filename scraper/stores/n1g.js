@@ -1,144 +1,86 @@
 /**
  * scraper/stores/n1g.js
- * Scraper para www.n1g.cl
- *
- * Estrategia: itera por categoría de hardware, carga paginación,
- * extrae nombre, precio y URL de cada producto.
- *
- * NOTA: Los selectores CSS deben revisarse si el sitio cambia su diseño.
- * Para inspeccionarlos: DevTools → Elements → copiar selector del precio/nombre.
+ * Scraper para www.n1g.cl usando axios + cheerio
+ * N1G usa WooCommerce
  */
 
 const BaseScraper = require('../base-scraper');
 
-// URLs de categorías de hardware en n1g.cl
-// Ajustar si el sitio cambia la estructura de URLs
 const CATEGORY_URLS = [
-  { url: 'https://www.n1g.cl/categoria/tarjetas-de-video/',   catId: 'gpu'     },
-  { url: 'https://www.n1g.cl/categoria/procesadores/',        catId: 'cpu'     },
-  { url: 'https://www.n1g.cl/categoria/memorias-ram/',        catId: 'ram'     },
-  { url: 'https://www.n1g.cl/categoria/almacenamiento/',      catId: 'storage' },
-  { url: 'https://www.n1g.cl/categoria/refrigeracion/',       catId: 'cooling' },
-  { url: 'https://www.n1g.cl/categoria/placas-madre/',        catId: 'mobo'    },
-  { url: 'https://www.n1g.cl/categoria/fuentes-de-poder/',    catId: 'psu'     },
-  { url: 'https://www.n1g.cl/categoria/gabinetes/',           catId: 'case'    },
-  { url: 'https://www.n1g.cl/categoria/monitores/',           catId: 'monitor' },
-  { url: 'https://www.n1g.cl/categoria/perifericos/',         catId: 'periph'  },
+  { url: 'https://www.n1g.cl/categoria/tarjetas-de-video/',  catId: 'gpu'     },
+  { url: 'https://www.n1g.cl/categoria/procesadores/',       catId: 'cpu'     },
+  { url: 'https://www.n1g.cl/categoria/memorias-ram/',       catId: 'ram'     },
+  { url: 'https://www.n1g.cl/categoria/almacenamiento/',     catId: 'storage' },
+  { url: 'https://www.n1g.cl/categoria/refrigeracion/',      catId: 'cooling' },
+  { url: 'https://www.n1g.cl/categoria/placas-madre/',       catId: 'mobo'    },
+  { url: 'https://www.n1g.cl/categoria/fuentes-de-poder/',   catId: 'psu'     },
+  { url: 'https://www.n1g.cl/categoria/gabinetes/',          catId: 'case'    },
+  { url: 'https://www.n1g.cl/categoria/monitores/',          catId: 'monitor' },
+  { url: 'https://www.n1g.cl/categoria/perifericos/',        catId: 'periph'  },
 ];
 
 class N1GScraper extends BaseScraper {
-  constructor() {
-    super('n1g', 'N1G');
-  }
+  constructor() { super('n1g', 'N1G'); }
 
   async scrapeAll() {
-    const page = await this.newPage();
-
     for (const { url, catId } of CATEGORY_URLS) {
       try {
-        await this.scrapeCategory(page, url, catId);
+        await this.scrapeCategory(url, catId);
         await this.delay();
       } catch (err) {
         this.stats.errors++;
-        this.log('warn', `Error en categoría ${catId}: ${err.message}`, { url });
+        this.log('warn', `Error en ${catId}: ${err.message}`);
       }
     }
-
-    await page.close();
   }
 
-  async scrapeCategory(page, baseUrl, catId) {
-    let pageNum = 1;
+  async scrapeCategory(baseUrl, catId) {
+    let page = 1;
     let hasMore = true;
+    const MAX_PAGES = 15;
 
-    while (hasMore) {
-      const url = pageNum === 1 ? baseUrl : `${baseUrl}page/${pageNum}/`;
-      this.log('info', `Scraping pág ${pageNum}`, { url });
+    while (hasMore && page <= MAX_PAGES) {
+      const url = page === 1 ? baseUrl : `${baseUrl}page/${page}/`;
+      this.log('info', `PÃ¡g ${page} â€” ${catId}`, { url });
 
-      const ok = await this.navigateWithRetry(page, url);
-      if (!ok) { this.stats.errors++; break; }
+      const $ = await this.fetchPage(url);
+      if (!$) { this.stats.errors++; break; }
 
-      // ── Esperar productos ──────────────────────────────────────────────
-      try {
-        await page.waitForSelector('.product', { timeout: 10000 });
-      } catch {
-        this.log('info', `No hay más productos en pág ${pageNum}`);
-        break;
-      }
+      // WooCommerce selectores
+      const products = [];
+      $('li.product, .product-item').each((_, el) => {
+        const name     = $(el).find('.woocommerce-loop-product__title, h2').first().text().trim();
+        const priceEl  = $(el).find('.price ins .amount, .price .woocommerce-Price-amount').first();
+        const price    = priceEl.text().trim() || $(el).find('.price .amount').first().text().trim();
+        const normalEl = $(el).find('.price del .amount').first().text().trim();
+        const href     = $(el).find('a').first().attr('href');
+        const img      = $(el).find('img').first().attr('data-src') || $(el).find('img').first().attr('src');
 
-      // ── Extraer productos ──────────────────────────────────────────────
-      const products = await page.evaluate((catId) => {
-        const items = [];
-        // Selectores típicos de WooCommerce (que usan muchas tiendas chilenas)
-        document.querySelectorAll('li.product, .product-item, .woocommerce-loop-product').forEach(el => {
-          const nameEl    = el.querySelector('.woocommerce-loop-product__title, h2.product-name, .product-title, h2');
-          const priceEl   = el.querySelector('.price ins .amount, .price .amount, .price bdi, [class*="price"]');
-          const normalEl  = el.querySelector('.price del .amount, .price del bdi');
-          const linkEl    = el.querySelector('a');
-          const imgEl     = el.querySelector('img');
-          const stockEl   = el.querySelector('.stock, [class*="stock"]');
+        if (name && price) products.push({ name, price, normal: normalEl, href, img });
+      });
 
-          const name    = nameEl?.textContent?.trim();
-          const price   = priceEl?.textContent?.trim();
-          const normal  = normalEl?.textContent?.trim();
-          const href    = linkEl?.href;
-          const imgSrc  = imgEl?.dataset?.src || imgEl?.src;
-          const stock   = stockEl?.textContent?.includes('Agotado') ? 'out_of_stock' : 'in_stock';
+      if (!products.length) { hasMore = false; break; }
 
-          if (name && price) {
-            items.push({ name, price, normal, href, imgSrc, stock, catId });
-          }
-        });
-        return items;
-      }, catId);
-
-      if (!products.length) {
-        hasMore = false;
-        break;
-      }
-
-      // ── Guardar en DB ──────────────────────────────────────────────────
-      for (const item of products) {
-        const current = this.parsePrice(item.price);
-        const normal  = this.parsePrice(item.normal);
+      for (const p of products) {
+        const current = this.parsePrice(p.price);
         if (!current) continue;
-
+        const normal = this.parsePrice(p.normal);
         this.stats.found++;
         this.saveProduct(
-          {
-            name:     item.name,
-            category: item.catId,
-            imageUrl: item.imgSrc,
-          },
-          {
-            current,
-            normal,
-            discount: normal ? Math.round((1 - current / normal) * 100) : null,
-            stock:    item.stock,
-            url:      item.href,
-          }
+          { name: p.name, category: catId, imageUrl: p.img },
+          { current, normal, discount: normal ? Math.round((1 - current/normal)*100) : null, url: p.href }
         );
       }
 
-      // ── ¿Hay página siguiente? ─────────────────────────────────────────
-      const nextExists = await page.$('.next.page-numbers, a.next, [aria-label="Siguiente"]');
-      if (!nextExists || products.length < 4) {
-        hasMore = false;
-      } else {
-        pageNum++;
-        await this.delay(1000, 2500);
-      }
+      // Verificar si hay pÃ¡gina siguiente
+      hasMore = $('a.next, .next.page-numbers').length > 0;
+      page++;
+      await this.delay(600, 1500);
     }
   }
 }
 
-// Ejecutar directamente si se llama como script
 if (require.main === module) {
-  const scraper = new N1GScraper();
-  scraper.run().then(result => {
-    console.log('Resultado N1G:', result);
-    process.exit(result.success ? 0 : 1);
-  });
+  new N1GScraper().run().then(r => { console.log('N1G:', r); process.exit(r.success ? 0 : 1); });
 }
-
 module.exports = N1GScraper;
