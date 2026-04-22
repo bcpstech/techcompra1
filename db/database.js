@@ -1,6 +1,6 @@
 /**
  * db/database.js
- * Singleton de conexión a SQLite compartido por toda la app.
+ * Singleton de conexiÃ³n a SQLite compartido por toda la app.
  */
 
 require('dotenv').config();
@@ -22,7 +22,7 @@ function getDb() {
   return _db;
 }
 
-// ── Helpers de productos ──────────────────────────────────────────────────
+// â”€â”€ Helpers de productos â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function upsertProduct(product) {
   const db = getDb();
@@ -42,11 +42,11 @@ function upsertProduct(product) {
 
 function upsertPrice(price) {
   const db = getDb();
-  // Un precio por producto/tienda/día — si ya existe, actualiza
+  // Un precio por producto/tienda/dÃ­a â€” si ya existe, actualiza
   const stmt = db.prepare(`
-    INSERT INTO prices (product_id, store_id, price, price_normal, discount_pct, stock, product_url, scraped_at)
-    VALUES (@product_id, @store_id, @price, @price_normal, @discount_pct, @stock, @product_url, datetime('now'))
-    ON CONFLICT(product_id, store_id, date(scraped_at)) DO UPDATE SET
+    INSERT INTO prices (product_id, store_id, price, price_normal, discount_pct, stock, product_url, price_date, scraped_at)
+    VALUES (@product_id, @store_id, @price, @price_normal, @discount_pct, @stock, @product_url, date('now'), datetime('now'))
+    ON CONFLICT(product_id, store_id, price_date) DO UPDATE SET
       price        = excluded.price,
       price_normal = excluded.price_normal,
       discount_pct = excluded.discount_pct,
