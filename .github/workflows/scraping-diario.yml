@@ -2,7 +2,7 @@ name: Scraping Diario — TechCompara.cl
 
 on:
   schedule:
-    - cron: '0 3 * * *' # Corre todos los días a las 03:00 UTC
+    - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
       stores:
@@ -19,19 +19,18 @@ on:
           - pcexpress
 
 env:
-  # Forzamos el uso de Node 24 para evitar avisos de deprecación
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 permissions:
   contents: write
-  
+
 jobs:
   scrape:
     name: "Scraping: ${{ matrix.store.name }}"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
-      max-parallel: 1 # Ejecuta uno tras otro para evitar conflictos en la DB y Git
+      max-parallel: 1
       matrix:
         store:
           - id: n1g
@@ -51,7 +50,6 @@ jobs:
             script: "scraper/stores/pcexpress.js"
 
     steps:
-      # 1. Validamos si este Job debe ejecutarse según el input o el schedule
       - name: Validar ejecución
         id: should_run
         run: |
@@ -63,27 +61,31 @@ jobs:
             echo "run=false" >> $GITHUB_OUTPUT
           fi
 
-      # 2. Descargar el código
       - name: Checkout
         if: steps.should_run.outputs.run == 'true'
-        uses: actions/checkout@v5
-      
-      # 3. Configurar entorno de Node.js 24
-      - name: Setup Node.js
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
         if: steps.should_run.outputs.run == 'true'
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v4
         with:
           node-version: '24'
 
-      # 4. Instalar dependencias
-      - name: Instalación de dependencias
+      - name: Cache node_modules
+        if: steps.should_run.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-${{ hashFiles('package.json') }}
+          restore-keys: node-
+
+      - name: Instalar dependencias
         if: steps.should_run.outputs.run == 'true'
         run: npm install
 
-      # 5. Gestionar Cache de la Base de Datos SQLite
-      - name: Restaurar Base de Datos
+      - name: Restaurar base de datos
         if: steps.should_run.outputs.run == 'true'
-        uses: actions/cache@v5
+        uses: actions/cache@v4
         with:
           path: db/techcompara.db
           key: db-${{ github.run_id }}
@@ -92,30 +94,28 @@ jobs:
       - name: Inicializar DB si no existe
         if: steps.should_run.outputs.run == 'true'
         run: if [ ! -f db/techcompara.db ]; then node db/init.js; fi
-        env: { DB_PATH: ./db/techcompara.db }
+        env:
+          DB_PATH: ./db/techcompara.db
 
-      # 6. Ejecución del Scraping propiamente tal
-     - name: Ejecutar Scraper
+      - name: Ejecutar scraper
         if: steps.should_run.outputs.run == 'true'
-        # Reemplaza la línea de 'run' por esta:
         run: node ${{ matrix.store.script }} || (echo "Fallo en ${{ matrix.store.name }}" && exit 1)
-        env: { DB_PATH: ./db/techcompara.db, NODE_ENV: production }
-        
-      # 7. Generar los archivos JSON para la web
+        env:
+          DB_PATH: ./db/techcompara.db
+          NODE_ENV: production
+
       - name: Exportar JSON
         if: steps.should_run.outputs.run == 'true'
         run: node scripts/export-json.js
-        env: { DB_PATH: ./db/techcompara.db }
+        env:
+          DB_PATH: ./db/techcompara.db
 
-      # 8. Guardar cambios en el repositorio
-      - name: Commit y Push de cambios
+      - name: Commit y Push
         if: steps.should_run.outputs.run == 'true'
         run: |
           git config user.email "bot@github.com"
           git config user.name "github-actions[bot]"
           git add docs/data/
-          git add db/techcompara.db || true
           git diff --staged --quiet || (git commit -m "precios ${{ matrix.store.name }} $(date '+%Y-%m-%d')" && git pull --rebase origin main && git push)
-        env: 
+        env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
