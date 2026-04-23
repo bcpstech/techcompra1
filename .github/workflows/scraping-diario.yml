@@ -19,8 +19,7 @@ on:
           - pcexpress
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
+  
 permissions:
   contents: write
 
@@ -69,7 +68,7 @@ jobs:
         if: steps.should_run.outputs.run == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '20'
 
       - name: Cache node_modules
         if: steps.should_run.outputs.run == 'true'
