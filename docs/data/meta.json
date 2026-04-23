@@ -1,6 +1,6 @@
 {
   "last_update": null,
-  "generated_at": "2026-04-22T23:40:29.077Z",
+  "generated_at": "2026-04-23T02:22:15.410Z",
   "total_products": 0,
   "total_stores": 5,
   "last_runs": [
@@ -9,7 +9,7 @@
       "status": "success",
       "products_updated": 0,
       "errors_count": 10,
-      "finished_at": "2026-04-22 23:40:29"
+      "finished_at": "2026-04-23 02:22:15"
     }
   ]
 }
