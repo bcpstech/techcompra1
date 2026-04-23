@@ -22,6 +22,9 @@ env:
   # Forzamos el uso de Node 24 para evitar avisos de deprecación
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
+permissions:
+  contents: write
+  
 jobs:
   scrape:
     name: "Scraping: ${{ matrix.store.name }}"
@@ -92,11 +95,12 @@ jobs:
         env: { DB_PATH: ./db/techcompara.db }
 
       # 6. Ejecución del Scraping propiamente tal
-      - name: Ejecutar Scraper
+     - name: Ejecutar Scraper
         if: steps.should_run.outputs.run == 'true'
-        run: node ${{ matrix.store.script }}
+        # Reemplaza la línea de 'run' por esta:
+        run: node ${{ matrix.store.script }} || (echo "Fallo en ${{ matrix.store.name }}" && exit 1)
         env: { DB_PATH: ./db/techcompara.db, NODE_ENV: production }
-
+        
       # 7. Generar los archivos JSON para la web
       - name: Exportar JSON
         if: steps.should_run.outputs.run == 'true'
@@ -114,3 +118,4 @@ jobs:
           git diff --staged --quiet || (git commit -m "precios ${{ matrix.store.name }} $(date '+%Y-%m-%d')" && git pull --rebase origin main && git push)
         env: 
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
