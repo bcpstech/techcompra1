@@ -1,9 +1,16 @@
 {
   "last_update": null,
-  "generated_at": "2026-04-23T02:31:07.393Z",
+  "generated_at": "2026-04-23T09:16:43.986Z",
   "total_products": 0,
   "total_stores": 5,
   "last_runs": [
+    {
+      "store_id": "n1g",
+      "status": "success",
+      "products_updated": 0,
+      "errors_count": 10,
+      "finished_at": "2026-04-23 09:16:43"
+    },
     {
       "store_id": "alltec",
       "status": "success",
