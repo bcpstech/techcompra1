@@ -49,6 +49,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git add docs/data/
           git diff --staged --quiet || git commit -m "precios N1G $(date '+%Y-%m-%d')"
+          git pull --rebase origin main
           git push
         env: { GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }
 
@@ -82,7 +83,8 @@ jobs:
           git config user.email "bot@github.com"
           git config user.name "github-actions[bot]"
           git add docs/data/
-          git diff --staged --quiet || git commit -m "precios Alltec $(date '+%Y-%m-%d')"
+          git diff --staged --quiet || git commit -m "precios N1G $(date '+%Y-%m-%d')"
+          git pull --rebase origin main
           git push
         env: { GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }
 
@@ -116,7 +118,8 @@ jobs:
           git config user.email "bot@github.com"
           git config user.name "github-actions[bot]"
           git add docs/data/
-          git diff --staged --quiet || git commit -m "precios CentralGamer $(date '+%Y-%m-%d')"
+          git diff --staged --quiet || git commit -m "precios N1G $(date '+%Y-%m-%d')"
+          git pull --rebase origin main
           git push
         env: { GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }
 
@@ -150,7 +153,8 @@ jobs:
           git config user.email "bot@github.com"
           git config user.name "github-actions[bot]"
           git add docs/data/
-          git diff --staged --quiet || git commit -m "precios Centrale $(date '+%Y-%m-%d')"
+          git diff --staged --quiet || git commit -m "precios N1G $(date '+%Y-%m-%d')"
+          git pull --rebase origin main
           git push
         env: { GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}' }
 
