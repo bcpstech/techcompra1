@@ -45,22 +45,35 @@ jobs:
           - id: pcexpress
             name: "PC-Express.cl"
             script: "scraper/stores/pcexpress.js"
-    
-    # El FIX está aquí:
-    if: ${{ github.event_name == 'schedule' || inputs.stores == 'todas' || inputs.stores == matrix.store.id }}
 
     steps:
+      # Definimos la lógica una sola vez para usarla en los pasos
+      - name: Check if store should run
+        id: should_run
+        run: |
+          if [[ "${{ github.event_name }}" == "schedule" ]] || \
+             [[ "${{ github.event.inputs.stores }}" == "todas" ]] || \
+             [[ "${{ github.event.inputs.stores }}" == "${{ matrix.store.id }}" ]]; then
+            echo "run=true" >> $GITHUB_OUTPUT
+          else
+            echo "run=false" >> $GITHUB_OUTPUT
+          fi
+
       - uses: actions/checkout@v5
+        if: steps.should_run.outputs.run == 'true'
       
       - uses: actions/setup-node@v5
+        if: steps.should_run.outputs.run == 'true'
         with:
           node-version: '24'
           cache: 'npm'
 
       - name: Instalación de dependencias
+        if: steps.should_run.outputs.run == 'true'
         run: npm install
 
       - name: Restaurar Base de Datos
+        if: steps.should_run.outputs.run == 'true'
         uses: actions/cache@v5
         with:
           path: db/techcompara.db
@@ -68,18 +81,22 @@ jobs:
           restore-keys: db-
 
       - name: Inicializar DB si no existe
+        if: steps.should_run.outputs.run == 'true'
         run: if [ ! -f db/techcompara.db ]; then node db/init.js; fi
         env: { DB_PATH: ./db/techcompara.db }
 
       - name: Ejecutar Scraper
+        if: steps.should_run.outputs.run == 'true'
         run: node ${{ matrix.store.script }}
         env: { DB_PATH: ./db/techcompara.db, NODE_ENV: production }
 
       - name: Exportar JSON
+        if: steps.should_run.outputs.run == 'true'
         run: node scripts/export-json.js
         env: { DB_PATH: ./db/techcompara.db }
 
       - name: Commit y Push de cambios
+        if: steps.should_run.outputs.run == 'true'
         run: |
           git config user.email "bot@github.com"
           git config user.name "github-actions[bot]"
